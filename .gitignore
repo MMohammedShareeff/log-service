@@ -82,9 +82,6 @@ logs/
 .DS_Store
 Thumbs.db
 
-### Docker ###
-# Don't ignore docker-compose.yml or Dockerfile - those are committed on purpose.
-# Ignore any local override files if you create them:
 docker-compose.override.yml
 
 ### Test / coverage output ###
