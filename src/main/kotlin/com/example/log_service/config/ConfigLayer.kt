@@ -1,6 +1,12 @@
-/**
- * Spring configuration beans (added in later epics).
- */
 package com.example.log_service.config
 
-internal object ConfigLayer
+import org.springframework.context.annotation.Bean
+import org.springframework.context.annotation.Configuration
+import java.time.Clock
+
+@Configuration
+class ConfigLayer {
+
+	@Bean
+	fun clock(): Clock = Clock.systemUTC()
+}

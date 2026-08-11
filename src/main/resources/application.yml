@@ -39,3 +39,5 @@ app:
   auth:
     enabled: ${AUTH_ENABLED:false}
     loadgen-api-key: ${LOADGEN_API_KEY:}
+  ingest:
+    batch-size: ${INGEST_BATCH_SIZE:1000}
