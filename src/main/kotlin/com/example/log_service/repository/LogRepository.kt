@@ -1,15 +1,21 @@
 package com.example.log_service.repository
 
+import com.example.log_service.service.LogCursor
 import org.springframework.jdbc.core.JdbcTemplate
+import org.springframework.jdbc.core.RowMapper
+import org.springframework.jdbc.core.namedparam.MapSqlParameterSource
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.stereotype.Repository
 import tools.jackson.databind.ObjectMapper
 import java.sql.Connection
+import java.sql.ResultSet
 import java.time.OffsetDateTime
 
 @Repository
 class LogRepository(
 	private val jdbcTemplate: JdbcTemplate,
 ) {
+	private val namedParameterJdbcTemplate = NamedParameterJdbcTemplate(jdbcTemplate)
 
 	fun insertAll(logs: List<LogRecord>) {
 		if (logs.isEmpty()) {
@@ -41,6 +47,63 @@ class LogRepository(
 		}
 	}
 
+	fun findLogs(criteria: LogQueryCriteria): List<StoredLogRecord> {
+		val params = MapSqlParameterSource()
+			.addValue("limit", criteria.limit)
+		val predicates = mutableListOf<String>()
+
+		criteria.service?.let {
+			predicates += "service = :service"
+			params.addValue("service", it)
+		}
+
+		criteria.level?.let {
+			predicates += "level = :level"
+			params.addValue("level", it)
+		}
+
+		criteria.since?.let {
+			predicates += "timestamp >= :since"
+			params.addValue("since", it)
+		}
+
+		criteria.until?.let {
+			predicates += "timestamp <= :until"
+			params.addValue("until", it)
+		}
+
+		criteria.q?.let {
+			predicates += "message ILIKE ('%' || :q || '%')"
+			params.addValue("q", it)
+		}
+
+		criteria.attributes.entries.forEachIndexed { index, (key, value) ->
+			val keyParam = "attrKey$index"
+			val valueParam = "attrValue$index"
+			predicates += "attributes ->> :$keyParam = :$valueParam"
+			params.addValue(keyParam, key)
+			params.addValue(valueParam, value)
+		}
+
+		criteria.cursor?.let {
+			predicates += "(timestamp, id) < (:cursorTimestamp, :cursorId)"
+			params.addValue("cursorTimestamp", it.timestamp)
+			params.addValue("cursorId", it.id)
+		}
+
+		val whereClause = if (predicates.isEmpty()) {
+			""
+		} else {
+			predicates.joinToString(prefix = " WHERE ", separator = " AND ")
+		}
+
+		return namedParameterJdbcTemplate.query(
+			QUERY_SQL_PREFIX + whereClause + QUERY_SQL_SUFFIX,
+			params,
+			STORED_LOG_ROW_MAPPER,
+		)
+	}
+
 	private companion object {
 		private val objectMapper = ObjectMapper()
 
@@ -55,6 +118,28 @@ class LogRepository(
 				?::jsonb[]
 			)
 		"""
+
+		private const val QUERY_SQL_PREFIX = """
+			SELECT id, timestamp, level, service, message, attributes
+			FROM logs
+		"""
+
+		private const val QUERY_SQL_SUFFIX = """
+			ORDER BY timestamp DESC, id DESC
+			LIMIT :limit
+		"""
+
+		private val STORED_LOG_ROW_MAPPER = RowMapper { rs: ResultSet, _: Int ->
+			val rawAttributes = objectMapper.readValue(rs.getString("attributes"), Map::class.java)
+			StoredLogRecord(
+				id = rs.getLong("id"),
+				timestamp = rs.getObject("timestamp", OffsetDateTime::class.java),
+				level = rs.getString("level"),
+				service = rs.getString("service"),
+				message = rs.getString("message"),
+				attributes = rawAttributes.entries.associate { (key, value) -> key.toString() to value },
+			)
+		}
 	}
 }
 
@@ -64,4 +149,24 @@ data class LogRecord(
 	val service: String,
 	val message: String,
 	val attributes: Map<String, Any>,
+)
+
+data class StoredLogRecord(
+	val id: Long,
+	val timestamp: OffsetDateTime,
+	val level: String,
+	val service: String,
+	val message: String,
+	val attributes: Map<String, Any?>,
+)
+
+data class LogQueryCriteria(
+	val service: String?,
+	val level: String?,
+	val since: OffsetDateTime?,
+	val until: OffsetDateTime?,
+	val attributes: Map<String, String>,
+	val q: String?,
+	val limit: Int,
+	val cursor: LogCursor?,
 )
