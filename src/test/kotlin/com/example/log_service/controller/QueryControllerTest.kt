@@ -114,6 +114,85 @@ class QueryControllerTest {
 		assertEquals(null, secondPage.body["next_cursor"])
 	}
 
+	@Test
+	fun aggregateReturnsAscendingBucketsWithNullGroupWhenGroupByIsOmitted() {
+		val service = "aggregate-buckets-${System.nanoTime()}"
+		val since = OffsetDateTime.now(ZoneOffset.UTC).minusHours(1).withSecond(0).withNano(0)
+		val until = since.plusMinutes(10)
+		ingest(
+			listOf(
+				log(since.plusSeconds(10), "info", service, "first aggregate row", mapOf("status" to 200)),
+				log(since.plusSeconds(30), "warn", service, "second aggregate row", mapOf("status" to 200)),
+				log(since.plusMinutes(1).plusSeconds(5), "info", service, "third aggregate row", mapOf("status" to 500)),
+			),
+		)
+
+		val response = getMap(
+			"/logs/aggregate?service=$service" +
+				"&since=${encode(since.toString())}" +
+				"&until=${encode(until.toString())}" +
+				"&bucket=1m" +
+				"&attr.status=200",
+		)
+
+		assertEquals(HttpStatus.OK.value(), response.status)
+		val buckets = response.body["buckets"] as List<*>
+		assertEquals(1, buckets.size)
+		val bucket = buckets.single() as Map<*, *>
+		assertEquals(since.toString(), bucket["start"])
+		assertEquals(null, bucket["group"])
+		assertEquals(2, bucket["count"])
+	}
+
+	@Test
+	fun aggregateCanGroupByLevelAndReuseTextFilter() {
+		val service = "aggregate-group-${System.nanoTime()}"
+		val since = OffsetDateTime.now(ZoneOffset.UTC).minusHours(1).withSecond(0).withNano(0)
+		val until = since.plusMinutes(10)
+		ingest(
+			listOf(
+				log(since.plusSeconds(10), "info", service, "checkout completed", emptyMap()),
+				log(since.plusSeconds(20), "info", service, "checkout completed again", emptyMap()),
+				log(since.plusSeconds(30), "error", service, "checkout failed", emptyMap()),
+				log(since.plusMinutes(1), "info", service, "not matched", emptyMap()),
+			),
+		)
+
+		val response = getMap(
+			"/logs/aggregate?service=$service" +
+				"&since=${encode(since.toString())}" +
+				"&until=${encode(until.toString())}" +
+				"&bucket=5m" +
+				"&group_by=level" +
+				"&q=checkout",
+		)
+
+		assertEquals(HttpStatus.OK.value(), response.status)
+		val buckets = response.body["buckets"] as List<*>
+		assertEquals(listOf("error", "info"), buckets.map { (it as Map<*, *>)["group"] })
+		assertEquals(listOf(1, 2), buckets.map { (it as Map<*, *>)["count"] })
+	}
+
+	@Test
+	fun invalidAggregateInputsReturnBadRequestErrors() {
+		listOf(
+			"/logs/aggregate?until=2026-08-12T10:00:00Z&bucket=1m" to "since is required",
+			"/logs/aggregate?since=2026-08-12T09:00:00Z&bucket=1m" to "until is required",
+			"/logs/aggregate?since=2026-08-12T09:00:00Z&until=2026-08-12T10:00:00Z" to "bucket is required",
+			"/logs/aggregate?since=bad&until=2026-08-12T10:00:00Z&bucket=1m" to "since must be ISO 8601",
+			"/logs/aggregate?since=2026-08-12T09:00:00Z&until=bad&bucket=1m" to "until must be ISO 8601",
+			"/logs/aggregate?since=2026-08-12T10:00:00Z&until=2026-08-12T09:00:00Z&bucket=1m" to "since must be before or equal to until",
+			"/logs/aggregate?since=2026-08-12T09:00:00Z&until=2026-08-12T10:00:00Z&bucket=10m" to "bucket must be one of: 1m, 5m, 1h, 1d",
+			"/logs/aggregate?since=2026-08-12T09:00:00Z&until=2026-08-12T10:00:00Z&bucket=1m&group_by=message" to "group_by must be one of: service, level",
+			"/logs/aggregate?since=2026-08-12T09:00:00Z&until=2026-08-12T10:00:00Z&bucket=1m&limit=10" to "unknown query parameter: limit",
+		).forEach { (path, expectedError) ->
+			val response = getMap(path)
+
+			assertEquals(HttpStatus.BAD_REQUEST.value(), response.status)
+			assertEquals(expectedError, response.body["error"])
+		}
+	}
+
 	private fun ingest(logs: List<LogEntryRequest>) {
 		val request = HttpRequest.newBuilder(uri("/logs"))
 			.header("Content-Type", "application/json")

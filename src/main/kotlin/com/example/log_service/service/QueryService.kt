@@ -1,7 +1,11 @@
 package com.example.log_service.service
 
+import com.example.log_service.dto.AggregateBucket
+import com.example.log_service.dto.AggregateResponse
 import com.example.log_service.dto.LogEntryResponse
 import com.example.log_service.dto.QueryLogsResponse
+import com.example.log_service.repository.AggregateGroupBy
+import com.example.log_service.repository.AggregateQueryCriteria
 import com.example.log_service.repository.LogQueryCriteria
 import com.example.log_service.repository.LogRepository
 import org.springframework.stereotype.Service
@@ -40,7 +44,65 @@ class QueryService(
 		)
 	}
 
+	fun aggregate(parameterMap: Map<String, Array<String>>): AggregateResponse {
+		val criteria = parseAggregate(parameterMap)
+		val buckets = logRepository.aggregate(criteria)
+
+		return AggregateResponse(
+			buckets = buckets.map {
+				AggregateBucket(
+					start = it.start.toString(),
+					group = it.group,
+					count = it.count,
+				)
+			},
+		)
+	}
+
 	private fun parse(parameterMap: Map<String, Array<String>>): LogQueryCriteria {
+		validateParameterNames(parameterMap, ALLOWED_QUERY_PARAMS)
+		return parseFilters(
+			parameterMap = parameterMap,
+			requireSinceUntil = false,
+			parseLimit = true,
+			parseCursor = true,
+		)
+	}
+
+	private fun parseAggregate(parameterMap: Map<String, Array<String>>): AggregateQueryCriteria {
+		validateParameterNames(parameterMap, ALLOWED_AGGREGATE_PARAMS)
+
+		val filters = parseFilters(
+			parameterMap = parameterMap,
+			requireSinceUntil = true,
+			parseLimit = false,
+			parseCursor = false,
+		)
+
+		val bucket = requiredNonBlank(parameterMap, "bucket").let { value ->
+			AggregateBucketSize.fromValue(value)
+				?: throw BadRequestException("bucket must be one of: 1m, 5m, 1h, 1d")
+		}
+
+		val groupBy = optionalNonBlank(parameterMap, "group_by")?.let { value ->
+			when (value) {
+				"service" -> AggregateGroupBy.SERVICE
+				"level" -> AggregateGroupBy.LEVEL
+				else -> throw BadRequestException("group_by must be one of: service, level")
+			}
+		}
+
+		return AggregateQueryCriteria(
+			filters = filters,
+			bucket = bucket,
+			groupBy = groupBy,
+		)
+	}
+
+	private fun validateParameterNames(
+		parameterMap: Map<String, Array<String>>,
+		allowedParams: Set<String>,
+	) {
 		val attributes = linkedMapOf<String, String>()
 		val seen = mutableSetOf<String>()
 
@@ -50,14 +112,28 @@ class QueryService(
 				if (!ATTRIBUTE_KEY_REGEX.matches(key)) {
 					throw BadRequestException("attribute filter key is invalid")
 				}
-				attributes[key] = singleValue(parameterMap, name)
-			} else if (name !in ALLOWED_PARAMS) {
+				singleValue(parameterMap, name)
+			} else if (name !in allowedParams) {
 				throw BadRequestException("unknown query parameter: $name")
 			}
 			if (!seen.add(name)) {
 				throw BadRequestException("duplicate query parameter: $name")
 			}
 		}
+	}
+
+	private fun parseFilters(
+		parameterMap: Map<String, Array<String>>,
+		requireSinceUntil: Boolean,
+		parseLimit: Boolean,
+		parseCursor: Boolean,
+	): LogQueryCriteria {
+		val attributes = linkedMapOf<String, String>()
+		parameterMap.keys
+			.filter { it.startsWith(ATTRIBUTE_PREFIX) }
+			.forEach { name ->
+				attributes[name.removePrefix(ATTRIBUTE_PREFIX)] = singleValue(parameterMap, name)
+			}
 
 		val service = optionalNonBlank(parameterMap, "service")
 		val level = optionalNonBlank(parameterMap, "level")?.also {
@@ -65,15 +141,27 @@ class QueryService(
 				throw BadRequestException("level must be one of: debug, info, warn, error")
 			}
 		}
-		val since = optionalDateTime(parameterMap, "since")
-		val until = optionalDateTime(parameterMap, "until")
+		val since = if (requireSinceUntil) {
+			requiredDateTime(parameterMap, "since")
+		} else {
+			optionalDateTime(parameterMap, "since")
+		}
+		val until = if (requireSinceUntil) {
+			requiredDateTime(parameterMap, "until")
+		} else {
+			optionalDateTime(parameterMap, "until")
+		}
 		if (since != null && until != null && since.isAfter(until)) {
 			throw BadRequestException("since must be before or equal to until")
 		}
 
 		val q = optionalNonBlank(parameterMap, "q")
-		val limit = optionalLimit(parameterMap)
-		val cursor = optionalNonBlank(parameterMap, "cursor")?.let(::decodeCursor)
+		val limit = if (parseLimit) optionalLimit(parameterMap) else DEFAULT_LIMIT
+		val cursor = if (parseCursor) {
+			optionalNonBlank(parameterMap, "cursor")?.let(::decodeCursor)
+		} else {
+			null
+		}
 
 		return LogQueryCriteria(
 			service = service,
@@ -106,8 +194,24 @@ class QueryService(
 		return value
 	}
 
+	private fun requiredNonBlank(parameterMap: Map<String, Array<String>>, name: String): String {
+		if (!parameterMap.containsKey(name)) {
+			throw BadRequestException("$name is required")
+		}
+		return optionalNonBlank(parameterMap, name) ?: throw BadRequestException("$name is required")
+	}
+
 	private fun optionalDateTime(parameterMap: Map<String, Array<String>>, name: String): OffsetDateTime? {
 		val value = optionalNonBlank(parameterMap, name) ?: return null
+		return parseDateTime(value, name)
+	}
+
+	private fun requiredDateTime(parameterMap: Map<String, Array<String>>, name: String): OffsetDateTime {
+		val value = requiredNonBlank(parameterMap, name)
+		return parseDateTime(value, name)
+	}
+
+	private fun parseDateTime(value: String, name: String): OffsetDateTime {
 		return try {
 			OffsetDateTime.parse(value)
 		} catch (_: DateTimeParseException) {
@@ -158,7 +262,8 @@ class QueryService(
 		private const val DEFAULT_LIMIT = 100
 		private const val MAX_LIMIT = 1000
 		private val VALID_LEVELS = setOf("debug", "info", "warn", "error")
-		private val ALLOWED_PARAMS = setOf("service", "level", "since", "until", "q", "limit", "cursor")
+		private val ALLOWED_QUERY_PARAMS = setOf("service", "level", "since", "until", "q", "limit", "cursor")
+		private val ALLOWED_AGGREGATE_PARAMS = setOf("service", "level", "since", "until", "q", "bucket", "group_by")
 		private val ATTRIBUTE_KEY_REGEX = Regex("[A-Za-z0-9_.-]+")
 	}
 }
@@ -169,3 +274,16 @@ data class LogCursor(
 )
 
 class BadRequestException(message: String) : RuntimeException(message)
+
+enum class AggregateBucketSize(val wireValue: String, val interval: String) {
+	ONE_MINUTE("1m", "1 minute"),
+	FIVE_MINUTES("5m", "5 minutes"),
+	ONE_HOUR("1h", "1 hour"),
+	ONE_DAY("1d", "1 day");
+
+	companion object {
+		fun fromValue(value: String): AggregateBucketSize? {
+			return entries.firstOrNull { it.wireValue == value }
+		}
+	}
+}
