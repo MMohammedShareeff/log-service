@@ -41,3 +41,10 @@ app:
     loadgen-api-key: ${LOADGEN_API_KEY:}
   ingest:
     batch-size: ${INGEST_BATCH_SIZE:1000}
+  retention:
+    enabled: ${RETENTION_ENABLED:true}
+    cron: ${RETENTION_CRON:0 0 0 * * *}
+    zone: ${RETENTION_ZONE:UTC}
+    retention-days: ${RETENTION_DAYS:30}
+    partition-days-ahead: ${PARTITION_DAYS_AHEAD:7}
+    lock-timeout: ${RETENTION_LOCK_TIMEOUT:2s}
