@@ -17,9 +17,13 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
+          cache: gradle
 
-      - name: Build and unit test
-        run: gradle build --no-daemon
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
+
+      - name: Build and test
+        run: ./gradlew build --no-daemon
 
   compose-smoke-test:
     runs-on: ubuntu-latest
@@ -30,13 +34,45 @@ jobs:
       - name: Start stack
         run: docker compose up -d --build
 
-      - name: Wait for health
+      - name: Wait for /health
         run: |
           for i in $(seq 1 30); do
             if curl -sf http://localhost:8080/health; then exit 0; fi
             sleep 2
           done
           echo "service did not become healthy in time" && exit 1
+
+      - name: POST /logs — ingest a batch
+        run: |
+          NOW=$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")
+          RESPONSE=$(curl -sf -X POST http://localhost:8080/logs \
+            -H "Content-Type: application/json" \
+            -d "{\"logs\":[{\"timestamp\":\"$NOW\",\"level\":\"info\",\"service\":\"ci-smoke-test\",\"message\":\"ci smoke test entry\",\"attributes\":{\"run_id\":\"${{ github.run_id }}\"}}]}")
+          echo "$RESPONSE"
+          ACCEPTED=$(echo "$RESPONSE" | jq -r '.accepted')
+          if [ "$ACCEPTED" -lt 1 ]; then
+            echo "expected at least 1 accepted entry, got: $RESPONSE"
+            exit 1
+          fi
+
+      - name: GET /logs — query back what was just ingested
+        run: |
+          RESPONSE=$(curl -sf "http://localhost:8080/logs?service=ci-smoke-test&limit=10")
+          echo "$RESPONSE"
+          echo "$RESPONSE" | jq -e 'has("logs") and has("next_cursor")' > /dev/null
+          COUNT=$(echo "$RESPONSE" | jq '.logs | length')
+          if [ "$COUNT" -lt 1 ]; then
+            echo "expected at least 1 log entry back, got: $RESPONSE"
+            exit 1
+          fi
+
+      - name: GET /logs/aggregate — bucketed aggregation
+        run: |
+          UNTIL=$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")
+          SINCE=$(date -u -d "1 hour ago" +"%Y-%m-%dT%H:%M:%S.000Z")
+          RESPONSE=$(curl -sf "http://localhost:8080/logs/aggregate?service=ci-smoke-test&since=$SINCE&until=$UNTIL&bucket=1m")
+          echo "$RESPONSE"
+          echo "$RESPONSE" | jq -e 'has("buckets")' > /dev/null
 
       - name: Tear down
         if: always()
