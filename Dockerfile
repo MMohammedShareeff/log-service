@@ -4,12 +4,12 @@ COPY gradlew gradlew.bat build.gradle.kts settings.gradle.kts ./
 COPY gradle ./gradle
 COPY src ./src
 RUN ./gradlew bootJar --no-daemon -x test
-
+ 
 FROM eclipse-temurin:21-jre-alpine
 WORKDIR /app
 COPY --from=build /app/build/libs/*.jar app.jar
-
-ENV JAVA_TOOL_OPTIONS="-Xmx128m -XX:+UseSerialGC -XX:MaxMetaspaceSize=96m"
-
+ 
+ENV JAVA_TOOL_OPTIONS="-Xmx128m -XX:+UseSerialGC -XX:MaxMetaspaceSize=96m -Xlog:gc*:file=/tmp/gc.log:time,uptime:filecount=0"
+ 
 EXPOSE 8080
 ENTRYPOINT ["java", "-jar", "app.jar"]

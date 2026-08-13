@@ -121,11 +121,13 @@ class LogRepository(
 		}
 
 		criteria.attributes.entries.forEachIndexed { index, (key, value) ->
-			val keyParam = "attrKey$index"
-			val valueParam = "attrValue$index"
-			predicates += "attributes ->> :$keyParam = :$valueParam"
-			params.addValue(keyParam, key)
-			params.addValue(valueParam, value)
+			val candidates = attributeCandidateValues(value)
+			val orPredicates = candidates.mapIndexed { candidateIndex, candidateValue ->
+				val paramName = "attr${index}_$candidateIndex"
+				params.addValue(paramName, objectMapper.writeValueAsString(mapOf(key to candidateValue)))
+				"attributes @> CAST(:$paramName AS jsonb)"
+			}
+			predicates += orPredicates.joinToString(prefix = "(", separator = " OR ", postfix = ")")
 		}
 
 		if (includeCursor) {
@@ -142,6 +144,16 @@ class LogRepository(
 			predicates.joinToString(prefix = " WHERE ", separator = " AND ")
 		}
 	}
+
+	private fun attributeCandidateValues(value: String): List<Any> {
+		val candidates = mutableListOf<Any>(value)
+		value.toBigDecimalOrNull()?.let { candidates += it }
+		when (value.lowercase()) {
+			"true" -> candidates += true
+			"false" -> candidates += false
+		}
+		return candidates
+}
 
 	private companion object {
 		private val objectMapper = ObjectMapper()

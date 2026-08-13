@@ -87,3 +87,4 @@ docker-compose.override.yml
 ### Test / coverage output ###
 .kotlin/
 coverage/
+local
