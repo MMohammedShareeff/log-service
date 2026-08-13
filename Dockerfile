@@ -8,6 +8,7 @@ COPY gradlew gradlew.bat build.gradle.kts settings.gradle.kts ./
 COPY gradle ./gradle
 COPY src ./src
 
+RUN chmod +x ./gradlew
 RUN ./gradlew bootJar --no-daemon -x test --no-parallel
 
 FROM eclipse-temurin:21-jre-alpine
