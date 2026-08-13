@@ -4,7 +4,7 @@ import { Counter, Trend } from "k6/metrics";
 import { buildBatch } from "./lib/log-generator.js";
 
 const BASE_URL = __ENV.BASE_URL || "http://localhost:8080";
-const BATCH_SIZE = parseInt(__ENV.BATCH_SIZE || "2000", 10);
+const BATCH_SIZE = parseInt(__ENV.BATCH_SIZE || "1000", 10);
 const TARGET_LOGS_PER_SEC = parseInt(__ENV.TARGET_LOGS_PER_SEC || "15000", 10);
 const DURATION = __ENV.DURATION || "60s";
 const MAX_AGE_MS = parseInt(__ENV.MAX_AGE_MS || String(5 * 60 * 1000), 10);

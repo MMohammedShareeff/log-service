@@ -11,8 +11,8 @@ spring:
     username: ${SPRING_DATASOURCE_USERNAME:logs}
     password: ${SPRING_DATASOURCE_PASSWORD:logs}
     hikari:
-      maximum-pool-size: 8
-      minimum-idle: 2
+      maximum-pool-size: 3
+      minimum-idle: 1
 
   flyway:
     enabled: true
