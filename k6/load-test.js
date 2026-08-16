@@ -1,13 +1,32 @@
+// The actual measured test - run this AFTER seed.js has pushed the table past 1M rows.
+// Two concurrent scenarios for the duration of the run:
+//   - "ingest": sustained batch ingestion targeting TARGET_LOGS_PER_SEC logs/sec
+//   - "aggregate": one GET /logs/aggregate request per second (per the spec's explicit target)
+//
+// This mirrors the spec's actual requirement: ingestion reliable AND queries fast
+// WHILE the system already holds 1M+ rows - not two separate tests glued together.
+//
+// Usage:
+//   k6 run k6/load-test.js
+//   k6 run -e TARGET_LOGS_PER_SEC=15000 -e BATCH_SIZE=500 -e DURATION=120s k6/load-test.js
+//
+// Start conservative (e.g. TARGET_LOGS_PER_SEC=5000) while you're still tuning batch size /
+// pool size, then push toward the real 15000 target once the pipeline is stable.
+
 import http from "k6/http";
 import { check } from "k6";
 import { Counter, Trend } from "k6/metrics";
 import { buildBatch } from "./lib/log-generator.js";
 
 const BASE_URL = __ENV.BASE_URL || "http://localhost:8080";
-const BATCH_SIZE = parseInt(__ENV.BATCH_SIZE || "1000", 10);
+const BATCH_SIZE = parseInt(__ENV.BATCH_SIZE || "500", 10);
 const TARGET_LOGS_PER_SEC = parseInt(__ENV.TARGET_LOGS_PER_SEC || "15000", 10);
 const DURATION = __ENV.DURATION || "60s";
+// Recent window for ingested timestamps - simulates live traffic, unlike seed.js's 3-day spread.
 const MAX_AGE_MS = parseInt(__ENV.MAX_AGE_MS || String(5 * 60 * 1000), 10);
+
+// constant-arrival-rate operates on requests/sec, but our unit of "throughput" is logs/sec -
+// convert here so TARGET_LOGS_PER_SEC stays the meaningful knob to tune.
 const batchRatePerSec = Math.max(
   1,
   Math.round(TARGET_LOGS_PER_SEC / BATCH_SIZE)
@@ -20,8 +39,8 @@ export const options = {
       rate: batchRatePerSec,
       timeUnit: "1s",
       duration: DURATION,
-      preAllocatedVUs: parseInt(__ENV.INGEST_VUS || "50", 10),
-      maxVUs: parseInt(__ENV.INGEST_MAX_VUS || "200", 10),
+      preAllocatedVUs: parseInt(__ENV.INGEST_VUS || "10", 10),
+      maxVUs: parseInt(__ENV.INGEST_MAX_VUS || "20", 10),
       exec: "ingest",
     },
     aggregate: {
@@ -35,6 +54,7 @@ export const options = {
     },
   },
   thresholds: {
+    // The spec's explicit target: aggregation p95 under 1s while ingestion is active.
     "http_req_duration{scenario:aggregate}": ["p(95)<1000"],
     "checks{scenario:ingest}": ["rate>0.99"],
     "checks{scenario:aggregate}": ["rate>0.99"],
@@ -69,7 +89,7 @@ export function ingest() {
 
 export function aggregate() {
   const until = new Date();
-  const since = new Date(until.getTime() - 5 * 60 * 1000);
+  const since = new Date(until.getTime() - 5 * 60 * 1000); // trailing 5-minute window
   const url =
     `${BASE_URL}/logs/aggregate?since=${since.toISOString()}` +
     `&until=${until.toISOString()}&bucket=1m`;
@@ -116,6 +136,8 @@ export function handleSummary(data) {
       ].toFixed(1)} ms`
     );
   }
+  console.log(`\nCopy these numbers into README.md's performance section.\n`);
+
   return {
     stdout: JSON.stringify(data, null, 2),
   };

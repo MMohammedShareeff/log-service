@@ -1,18 +1,24 @@
 // Shared random log-entry generator, reused by seed.js and load-test.js so both scripts
 // produce data with the same shape and the same realistic spread of services/levels/attributes.
 
-export const SERVICES = ['checkout', 'auth', 'inventory', 'notifications', 'payments'];
-export const LEVELS = ['debug', 'info', 'warn', 'error'];
-export const REGIONS = ['eu-west', 'us-east', 'us-west', 'ap-south'];
+export const SERVICES = [
+  "checkout",
+  "auth",
+  "inventory",
+  "notifications",
+  "payments",
+];
+export const LEVELS = ["debug", "info", "warn", "error"];
+export const REGIONS = ["eu-west", "us-east", "us-west", "ap-south"];
 export const MESSAGES = [
-  'payment declined',
-  'request completed',
-  'connection timeout',
-  'user login',
-  'cache miss',
-  'retrying operation',
-  'rate limit exceeded',
-  'order confirmed',
+  "payment declined",
+  "request completed",
+  "connection timeout",
+  "user login",
+  "cache miss",
+  "retrying operation",
+  "rate limit exceeded",
+  "order confirmed",
 ];
 
 function pick(arr) {

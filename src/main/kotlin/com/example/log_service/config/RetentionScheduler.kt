@@ -31,10 +31,24 @@ class RetentionScheduler(
 	}
 
 	@Scheduled(cron = "\${app.retention.cron:0 0 0 * * *}", zone = "\${app.retention.zone:UTC}")
+	@Scheduled(cron = "\${app.retention.cron:0 0 0 * * *}", zone = "\${app.retention.zone:UTC}")
 	fun maintainPartitions() {
 		val today = LocalDate.now(clock.withZone(ZoneOffset.UTC))
 		createUpcomingPartitions(today)
 		dropExpiredPartitions(today)
+
+		pruneExpiredRollups(today)
+	}
+
+	private fun pruneExpiredRollups(today: LocalDate) {
+	val cutoff = today.minusDays(retentionDays.coerceAtLeast(1))
+		.atStartOfDay()
+		.atOffset(ZoneOffset.UTC)
+
+		jdbcTemplate.update(
+			"DELETE FROM log_rollup WHERE start_bucket < ?",
+			cutoff,
+		)
 	}
 
 	private fun createUpcomingPartitions(today: LocalDate) {
