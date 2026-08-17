@@ -11,15 +11,17 @@ import tools.jackson.databind.ObjectMapper
 import java.sql.Connection
 import java.sql.ResultSet
 import java.time.OffsetDateTime
+import org.springframework.beans.factory.annotation.Qualifier
 import java.time.temporal.ChronoUnit
 
 @Repository
 class LogRepository(
     private val jdbcTemplate: JdbcTemplate,
+    @Qualifier("readJdbcTemplate") readJdbcTemplate: JdbcTemplate,
 ) {
-    private val namedParameterJdbcTemplate = NamedParameterJdbcTemplate(jdbcTemplate)
+     private val readNamedParameterJdbcTemplate = NamedParameterJdbcTemplate(readJdbcTemplate)
 
-    fun insertAll(logs: List<LogRecord>) {
+     fun insertAll(logs: List<LogRecord>) {
         if (logs.isEmpty()) return
 
         jdbcTemplate.execute { connection: Connection ->
@@ -84,7 +86,7 @@ class LogRepository(
             .addValue("limit", criteria.limit)
         val whereClause = buildWhereClause(criteria, params, includeCursor = true)
 
-        return namedParameterJdbcTemplate.query(
+        return readNamedParameterJdbcTemplate.query(
             QUERY_SQL_PREFIX + whereClause + QUERY_SQL_SUFFIX,
             params,
             STORED_LOG_ROW_MAPPER,
@@ -109,7 +111,7 @@ class LogRepository(
         val whereClause = buildWhereClause(criteria.filters, params, includeCursor = false)
         val groupSelect = criteria.groupBy?.sqlExpression ?: "NULL::text"
 
-        return namedParameterJdbcTemplate.query(
+        return readNamedParameterJdbcTemplate.query(
             """
             SELECT
                 date_bin(CAST(:bucketInterval AS interval), timestamp, :origin) AS bucket_start,
@@ -171,7 +173,7 @@ class LogRepository(
             ORDER BY bin_start ASC, group_name ASC NULLS FIRST
         """.trimIndent()
 
-        return namedParameterJdbcTemplate.query(sql, params, AGGREGATE_ROW_MAPPER)
+        return readNamedParameterJdbcTemplate.query(sql, params, AGGREGATE_ROW_MAPPER)
     }
 
     private fun buildWhereClause(
