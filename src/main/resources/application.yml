@@ -41,6 +41,14 @@ logging:
     root: INFO
 
 app:
+  datasource:
+    read:
+      jdbc-url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/logs}
+      username: ${SPRING_DATASOURCE_USERNAME:logs}
+      password: ${SPRING_DATASOURCE_PASSWORD:logs}
+      maximum-pool-size: ${DB_READ_POOL_MAX:5}
+      minimum-idle: 1
+      connection-timeout: 3000
   auth:
     enabled: ${AUTH_ENABLED:false}
     loadgen-api-key: ${LOADGEN_API_KEY:}
