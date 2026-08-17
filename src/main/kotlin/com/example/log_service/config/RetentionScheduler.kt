@@ -31,7 +31,6 @@ class RetentionScheduler(
 	}
 
 	@Scheduled(cron = "\${app.retention.cron:0 0 0 * * *}", zone = "\${app.retention.zone:UTC}")
-	@Scheduled(cron = "\${app.retention.cron:0 0 0 * * *}", zone = "\${app.retention.zone:UTC}")
 	fun maintainPartitions() {
 		val today = LocalDate.now(clock.withZone(ZoneOffset.UTC))
 		createUpcomingPartitions(today)
@@ -46,7 +45,7 @@ class RetentionScheduler(
 		.atOffset(ZoneOffset.UTC)
 
 		jdbcTemplate.update(
-			"DELETE FROM log_rollup WHERE start_bucket < ?",
+			"DELETE FROM log_rollup WHERE bucket_start < ?",
 			cutoff,
 		)
 	}

@@ -25,33 +25,20 @@ class LogRepository(
         jdbcTemplate.execute { connection: Connection ->
             connection.autoCommit = false
             try {
-                connection.prepareStatement(INSERT_SQL).use { statement ->
-                    val timestamps = connection.createArrayOf(
-                        "timestamptz",
-                        logs.map { it.timestamp }.toTypedArray(),
-                    )
-                    val levels = connection.createArrayOf("text", logs.map { it.level }.toTypedArray())
-                    val services = connection.createArrayOf("text", logs.map { it.service }.toTypedArray())
-                    val messages = connection.createArrayOf("text", logs.map { it.message }.toTypedArray())
-                    val attributes = connection.createArrayOf(
-                        "jsonb",
-                        logs.map { objectMapper.writeValueAsString(it.attributes) }.toTypedArray(),
-                    )
-
-                    statement.setArray(1, timestamps)
-                    statement.setArray(2, levels)
-                    statement.setArray(3, services)
-                    statement.setArray(4, messages)
-                    statement.setArray(5, attributes)
-                    statement.executeUpdate()
-                }
+                val pgConnection = connection.unwrap(org.postgresql.core.BaseConnection::class.java)
+                val copyManager = org.postgresql.copy.CopyManager(pgConnection)
+                val csv = buildCsvPayload(logs)
+                copyManager.copyIn(COPY_SQL, java.io.StringReader(csv))
 
                 val rollupCounts = logs
                     .groupingBy { Triple(truncateToMinute(it.timestamp), it.service, it.level) }
-                    .eachCount()
+                    .eachCount()				
+				 val sortedRollups = rollupCounts.entries.sortedWith(
+                	compareBy({ it.key.first }, { it.key.second }, { it.key.third })
+            	 )
 
                 connection.prepareStatement(ROLLUP_UPSERT_SQL).use { statement ->
-                    for ((key, count) in rollupCounts) {
+                    for ((key, count) in sortedRollups) {
                         val (bucket, service, level) = key
                         statement.setObject(1, bucket)
                         statement.setString(2, service)
@@ -70,6 +57,22 @@ class LogRepository(
                 connection.autoCommit = true
             }
         }
+    }
+
+    private fun buildCsvPayload(logs: List<LogRecord>): String {
+        val builder = StringBuilder()
+        for (log in logs) {
+            builder.append(csvField(log.timestamp.toString())).append(',')
+            builder.append(csvField(log.level)).append(',')
+            builder.append(csvField(log.service)).append(',')
+            builder.append(csvField(log.message)).append(',')
+            builder.append(csvField(objectMapper.writeValueAsString(log.attributes))).append('\n')
+        }
+        return builder.toString()
+    }
+
+    private fun csvField(value: String): String {
+        return "\"" + value.replace("\"", "\"\"") + "\""
     }
 
     private fun truncateToMinute(ts: OffsetDateTime): OffsetDateTime {
@@ -245,9 +248,9 @@ class LogRepository(
     private companion object {
         private val objectMapper = ObjectMapper()
 
-        private const val INSERT_SQL = """
-            INSERT INTO logs (timestamp, level, service, message, attributes)
-            SELECT * FROM unnest(?::timestamptz[], ?::text[], ?::text[], ?::text[], ?::jsonb[])
+        private const val COPY_SQL = """
+            COPY logs (timestamp, level, service, message, attributes)
+            FROM STDIN WITH (FORMAT csv)
         """
 
         private const val QUERY_SQL_PREFIX = """
