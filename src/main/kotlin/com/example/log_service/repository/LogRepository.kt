@@ -108,11 +108,6 @@ class LogRepository(
             .addValue("origin", criteria.filters.since)
         val whereClause = buildWhereClause(criteria.filters, params, includeCursor = false)
         val groupSelect = criteria.groupBy?.sqlExpression ?: "NULL::text"
-        val groupByClause = if (criteria.groupBy == null) {
-            "bucket_start"
-        } else {
-            "bucket_start, group_name"
-        }
 
         return namedParameterJdbcTemplate.query(
             """
@@ -122,7 +117,7 @@ class LogRepository(
                 count(*) AS count
             FROM logs
             $whereClause
-            GROUP BY $groupByClause
+            GROUP BY bucket_start, group_name
             ORDER BY bucket_start ASC, group_name ASC NULLS FIRST
             """.trimIndent(),
             params,
@@ -158,11 +153,6 @@ class LogRepository(
             null -> "NULL::text"
         }
 
-        val outerGroupByClause = if (criteria.groupBy == null) {
-            "bin_start"
-        } else {
-            "bin_start, group_name"
-        }
 
         val sql = """
             SELECT
@@ -177,7 +167,7 @@ class LogRepository(
                 FROM log_rollup
                 $where
             ) AS binned
-            GROUP BY $outerGroupByClause
+            GROUP BY bin_start, group_name
             ORDER BY bin_start ASC, group_name ASC NULLS FIRST
         """.trimIndent()
 
