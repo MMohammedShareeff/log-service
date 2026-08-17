@@ -42,6 +42,8 @@ app:
     loadgen-api-key: ${LOADGEN_API_KEY:}
   ingest:
     batch-size: ${INGEST_BATCH_SIZE:1000}
+    coalesce-window-ms: ${INGEST_COALESCE_WINDOW_MS:5}
+    coalesce-max-rows: ${INGEST_COALESCE_MAX_ROWS:2000}
   retention:
     enabled: ${RETENTION_ENABLED:true}
     cron: ${RETENTION_CRON:0 0 0 * * *}

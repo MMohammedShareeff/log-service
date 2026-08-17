@@ -158,21 +158,27 @@ class LogRepository(
             null -> "NULL::text"
         }
 
-        val groupByClause = if (criteria.groupBy == null) {
-            "bucket_start"
+        val outerGroupByClause = if (criteria.groupBy == null) {
+            "bin_start"
         } else {
-            "bucket_start, group_name"
+            "bin_start, group_name"
         }
 
         val sql = """
             SELECT
-                date_bin(CAST(:bucketInterval AS interval), bucket_start, :origin) AS bucket_start,
-                $groupSelect AS group_name,
-                SUM(count) AS count
-            FROM log_rollup
-            $where
-            GROUP BY $groupByClause
-            ORDER BY bucket_start ASC, group_name ASC NULLS FIRST
+                bin_start AS bucket_start,
+                group_name,
+                SUM(row_count) AS count
+            FROM (
+                SELECT
+                    date_bin(CAST(:bucketInterval AS interval), bucket_start, :origin) AS bin_start,
+                    $groupSelect AS group_name,
+                    count AS row_count
+                FROM log_rollup
+                $where
+            ) AS binned
+            GROUP BY $outerGroupByClause
+            ORDER BY bin_start ASC, group_name ASC NULLS FIRST
         """.trimIndent()
 
         return namedParameterJdbcTemplate.query(sql, params, AGGREGATE_ROW_MAPPER)
