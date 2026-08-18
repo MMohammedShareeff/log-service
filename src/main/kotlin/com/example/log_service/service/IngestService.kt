@@ -5,7 +5,6 @@ import com.example.log_service.dto.IngestResponse
 import com.example.log_service.dto.LogEntryRequest
 import com.example.log_service.dto.RejectedEntry
 import com.example.log_service.repository.LogRecord
-import com.example.log_service.repository.LogRepository
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
 import java.math.BigDecimal
@@ -16,7 +15,7 @@ import java.time.format.DateTimeParseException
 
 @Service
 class IngestService(
-	private val logRepository: LogRepository,
+	private val ingestCoalescer: IngestCoalescer,
 	@Value("\${app.ingest.batch-size:1000}")
 	private val batchSize: Int,
 	private val clock: Clock = Clock.systemUTC(),
@@ -33,7 +32,7 @@ class IngestService(
 			}
 		}
 
-		accepted.chunked(effectiveBatchSize()).forEach(logRepository::insertAll)
+		accepted.chunked(effectiveBatchSize()).forEach(ingestCoalescer::submitAndAwait)
 
 		return IngestResponse(
 			accepted = accepted.size,
