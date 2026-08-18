@@ -22,6 +22,9 @@ class IngestService(
 ) {
 
 	fun ingest(request: IngestRequest): IngestResponse {
+		if (request.logs.isEmpty()) {
+			throw BadRequestException("logs must not be empty")
+		}
 		val accepted = mutableListOf<LogRecord>()
 		val rejected = mutableListOf<RejectedEntry>()
 
