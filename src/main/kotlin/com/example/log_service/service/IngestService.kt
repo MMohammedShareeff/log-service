@@ -1,5 +1,7 @@
 package com.example.log_service.service
 
+import com.example.log_service.config.AdmissionDecision
+import com.example.log_service.config.IngestAdmissionController
 import com.example.log_service.dto.IngestRequest
 import com.example.log_service.dto.IngestResponse
 import com.example.log_service.dto.LogEntryRequest
@@ -15,115 +17,134 @@ import java.time.format.DateTimeParseException
 
 @Service
 class IngestService(
-	private val ingestCoalescer: IngestCoalescer,
-	@Value("\${app.ingest.batch-size:1000}")
-	private val batchSize: Int,
-	private val clock: Clock = Clock.systemUTC(),
+    private val ingestCoalesce: IngestCoalescer,
+    private val admissionController: IngestAdmissionController,
+    @Value("\${app.ingest.batch-size:1000}")
+    private val batchSize: Int,
+    private val clock: Clock = Clock.systemUTC(),
 ) {
 
-	fun ingest(request: IngestRequest): IngestResponse {
-		if (request.logs.isEmpty()) {
-			throw BadRequestException("logs must not be empty")
-		}
-		val accepted = mutableListOf<LogRecord>()
-		val rejected = mutableListOf<RejectedEntry>()
+    fun ingest(request: IngestRequest): IngestResponse {
+        if (request.logs.isEmpty()) {
+            throw BadRequestException("logs must not be empty")
+        }
 
-		request.logs.forEachIndexed { index, entry ->
-			when (val result = validate(entry)) {
-				is ValidationResult.Accepted -> accepted += result.log
-				is ValidationResult.Rejected -> rejected += RejectedEntry(index, result.reason)
-			}
-		}
+        val rowCount = request.logs.size
+        when (val decision = admissionController.tryAdmitRows(rowCount)) {
+            is AdmissionDecision.RejectedTooLarge -> throw PayloadTooLargeException(decision.reason)
 
-		accepted.chunked(effectiveBatchSize()).forEach(ingestCoalescer::submitAndAwait)
+            is AdmissionDecision.RejectedOverloaded -> throw OverloadedException(admissionController.retryAfterSeconds)
 
-		return IngestResponse(
-			accepted = accepted.size,
-			rejected = rejected,
-		)
-	}
+            is AdmissionDecision.Admitted -> Unit
+        }
 
-	private fun validate(entry: LogEntryRequest): ValidationResult {
-		val timestamp = parseTimestamp(entry.timestamp)
-			?: return ValidationResult.Rejected("timestamp must be ISO 8601")
+        try {
+            val accepted = mutableListOf<LogRecord>()
+            val rejected = mutableListOf<RejectedEntry>()
 
-		if (timestamp.toInstant().isAfter(clock.instant().plusSeconds(MAX_FUTURE_SECONDS))) {
-			return ValidationResult.Rejected("timestamp cannot be more than 5 minutes in the future")
-		}
+            request.logs.forEachIndexed { index, entry ->
+                when (val result = validate(entry)) {
+                    is ValidationResult.Accepted -> accepted += result.log
+                    is ValidationResult.Rejected -> rejected += RejectedEntry(index, result.reason)
+                }
+            }
 
-		val level = entry.level?.trim()
-			?: return ValidationResult.Rejected("level is required")
-		if (level !in VALID_LEVELS) {
-			return ValidationResult.Rejected("level must be one of: debug, info, warn, error")
-		}
+            accepted.chunked(effectiveBatchSize()).forEach(ingestCoalesce::submitAndAwait)
 
-		val service = entry.service?.trim()
-			?.takeIf { it.isNotEmpty() }
-			?: return ValidationResult.Rejected("service must not be empty")
+            return IngestResponse(
+                accepted = accepted.size,
+                rejected = rejected,
+            )
+        } finally {
+            admissionController.releaseRows(rowCount)
+        }
 
-		val message = entry.message?.trim()
-			?.takeIf { it.isNotEmpty() }
-			?: return ValidationResult.Rejected("message must not be empty")
+    }
 
-		val attributes = entry.attributes.orEmpty()
-		val invalidAttribute = attributes.entries.firstOrNull { (_, value) -> !value.isFlatJsonScalar() }
-		if (invalidAttribute != null) {
-			return ValidationResult.Rejected(
-				"attributes.${invalidAttribute.key} must be a string, number, or boolean",
-			)
-		}
+    private fun validate(entry: LogEntryRequest): ValidationResult {
+        val timestamp =
+            parseTimestamp(entry.timestamp) ?: return ValidationResult.Rejected("timestamp must be ISO 8601")
 
-		return ValidationResult.Accepted(
-			LogRecord(
-				timestamp = timestamp,
-				level = level,
-				service = service,
-				message = message,
-				attributes = attributes.mapValues { (_, value) -> value as Any },
-			),
-		)
-	}
+        if (timestamp.toInstant().isAfter(clock.instant().plusSeconds(MAX_FUTURE_SECONDS))) {
+            return ValidationResult.Rejected("timestamp cannot be more than 5 minutes in the future")
+        }
 
-	private fun parseTimestamp(timestamp: String?): OffsetDateTime? {
-		if (timestamp.isNullOrBlank()) {
-			return null
-		}
+        val level = entry.level?.trim() ?: return ValidationResult.Rejected("level is required")
+        if (level !in VALID_LEVELS) {
+            return ValidationResult.Rejected("level must be one of: debug, info, warn, error")
+        }
 
-		return try {
-			OffsetDateTime.parse(timestamp)
-		} catch (_: DateTimeParseException) {
-			null
-		}
-	}
+        val service = entry.service?.trim()?.takeIf { it.isNotEmpty() }
+            ?: return ValidationResult.Rejected("service must not be empty")
 
-	private fun Any?.isFlatJsonScalar(): Boolean {
-		return when (this) {
-			is String,
-			is Boolean,
-			is Byte,
-			is Short,
-			is Int,
-			is Long,
-			is Float,
-			is Double,
-			is BigInteger,
-			is BigDecimal,
-				-> true
-			else -> false
-		}
-	}
+        val message = entry.message?.trim()?.takeIf { it.isNotEmpty() }
+            ?: return ValidationResult.Rejected("message must not be empty")
 
-	private fun effectiveBatchSize(): Int {
-		return batchSize.coerceAtLeast(1)
-	}
+        val attributes = entry.attributes.orEmpty()
+        val invalidAttribute = attributes.entries.firstOrNull { (_, value) -> !value.isFlatJsonScalar() }
+        if (invalidAttribute != null) {
+            return ValidationResult.Rejected(
+                "attributes.${invalidAttribute.key} must be a string, number, or boolean",
+            )
+        }
 
-	private sealed interface ValidationResult {
-		data class Accepted(val log: LogRecord) : ValidationResult
-		data class Rejected(val reason: String) : ValidationResult
-	}
+        return ValidationResult.Accepted(
+            LogRecord(
+                timestamp = timestamp,
+                level = level,
+                service = service,
+                message = message,
+                attributes = attributes.mapValues { (_, value) -> value as Any },
+            ),
+        )
+    }
 
-	private companion object {
-		private val VALID_LEVELS = setOf("debug", "info", "warn", "error")
-		private const val MAX_FUTURE_SECONDS = 5 * 60L
-	}
+
+    private fun parseTimestamp(timestamp: String?): OffsetDateTime? {
+        if (timestamp.isNullOrBlank()) {
+            return null
+        }
+
+        return try {
+            OffsetDateTime.parse(timestamp)
+        } catch (_: DateTimeParseException) {
+            null
+        }
+    }
+
+    private fun Any?.isFlatJsonScalar(): Boolean {
+        return when (this) {
+            is String,
+            is Boolean,
+            is Byte,
+            is Short,
+            is Int,
+            is Long,
+            is Float,
+            is Double,
+            is BigInteger,
+            is BigDecimal,
+            -> true
+
+            else -> false
+        }
+    }
+
+    private fun effectiveBatchSize(): Int {
+        return batchSize.coerceAtLeast(1)
+    }
+
+    private sealed interface ValidationResult {
+        data class Accepted(val log: LogRecord) : ValidationResult
+        data class Rejected(val reason: String) : ValidationResult
+    }
+
+    private companion object {
+        private val VALID_LEVELS = setOf("debug", "info", "warn", "error")
+        private const val MAX_FUTURE_SECONDS = 5 * 60L
+    }
 }
+
+class PayloadTooLargeException(message: String) : RuntimeException(message)
+class OverloadedException(val retryAfterSeconds: Long) :
+    RuntimeException("server temporarily overloaded, retry shortly")

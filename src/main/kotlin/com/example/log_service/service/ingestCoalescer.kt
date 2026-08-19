@@ -17,7 +17,8 @@ import kotlin.concurrent.withLock
 @Component
 class IngestCoalescer(
     private val logRepository: LogRepository,
-    @Value("\${app.ingest.coalesce-window-ms:5}") private val windowMs: Long,
+    @Value("\${app.ingest.coalesce-window-ms:5}")
+    private val windowMs: Long,
     @Value("\${app.ingest.coalesce-max-rows:2000}") private val maxRows: Int,
 ) {
     private val lock = ReentrantLock()
@@ -25,10 +26,9 @@ class IngestCoalescer(
     private var pendingFutures = mutableListOf<CompletableFuture<Unit>>()
     private var scheduledFlush: ScheduledFuture<*>? = null
 
-    private val scheduler: ScheduledExecutorService =
-        Executors.newSingleThreadScheduledExecutor { runnable ->
-            Thread(runnable, "ingest-coalescer").apply { isDaemon = true }
-        }
+    private val scheduler: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor { runnable ->
+        Thread(runnable, "ingest-coalescer").apply { isDaemon = true }
+    }
 
     fun submit(logs: List<LogRecord>): CompletableFuture<Unit> {
         if (logs.isEmpty()) {
@@ -36,7 +36,7 @@ class IngestCoalescer(
         }
 
         val future = CompletableFuture<Unit>()
-        val shouldFlushNow: Boolean
+        var shouldFlushNow: Boolean = false
 
         lock.withLock {
             pendingLogs.addAll(logs)
@@ -55,6 +55,7 @@ class IngestCoalescer(
 
         return future
     }
+
     fun submitAndAwait(logs: List<LogRecord>) {
         try {
             submit(logs).get()

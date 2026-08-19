@@ -1,5 +1,7 @@
 package com.example.log_service.dto
 
+import java.util.Collections.emptyMap
+
 data class LogEntryResponse(
     val id: String,
     val timestamp: String,
@@ -25,7 +27,7 @@ data class LogQueryParams(
     val level: String? = null,
     val since: String? = null,
     val until: String? = null,
-    val attributes: Map<String, String> = emptyMap(), 
+    val attributes: Map<String, String> = emptyMap(),
     val q: String? = null,
     val limit: Int = 100,
     val cursor: String? = null,

@@ -1,5 +1,7 @@
 package com.example.log_service.dto
 
+import java.util.Collections.emptyList
+
 data class LogEntryRequest(
     val timestamp: String? = null,
     val level: String? = null,
