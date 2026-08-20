@@ -234,23 +234,21 @@ class QueryService(
     }
 
     private fun decodeCursor(cursor: String): LogCursor {
-        val decoded = try {
-            java.lang.String(Base64.getUrlDecoder().decode(cursor), StandardCharsets.UTF_8)
-        } catch (_: IllegalArgumentException) {
-            throw BadRequestException("cursor is invalid")
-        }
+    try {
+        val decoded = String(Base64.getUrlDecoder().decode(cursor), StandardCharsets.UTF_8)
         val parts = decoded.split("|")
         if (parts.size != 2) {
             throw BadRequestException("cursor is invalid")
         }
-        val timestamp = try {
-            OffsetDateTime.parse(parts[0])
-        } catch (_: DateTimeParseException) {
-            throw BadRequestException("cursor is invalid")
-        }
+        val timestamp = OffsetDateTime.parse(parts[0])
         val id = parts[1].toLongOrNull() ?: throw BadRequestException("cursor is invalid")
         return LogCursor(timestamp, id)
+    } catch (e: BadRequestException) {
+        throw e
+    } catch (e: Exception) {
+        throw BadRequestException("cursor is invalid")
     }
+}
 
     private companion object {
         private const val ATTRIBUTE_PREFIX = "attr."
