@@ -7,8 +7,7 @@ time-bucketed aggregation, and configurable retention under sustained ingestion 
 Built with Kotlin, Spring Boot, JdbcTemplate, and PostgreSQL 16. Runs entirely via docker compose up.
 
 ## Setup and Usage
-### pre-requirements:
-Docker desktop (or any docker service) up and running.
+**pre-requirements:** Docker desktop (or any docker service) up and running.
 
 The system will be up and running using the below command
 ```bash
