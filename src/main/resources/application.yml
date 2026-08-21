@@ -11,7 +11,7 @@ spring:
     username: ${SPRING_DATASOURCE_USERNAME:logs}
     password: ${SPRING_DATASOURCE_PASSWORD:logs}
     hikari:
-      maximum-pool-size: ${DB_WRITE_POOL_MAX:6}
+      maximum-pool-size: ${DB_WRITE_POOL_MAX:10}
       minimum-idle: 2
       connection-timeout: 3000
       idle-timeout: 300000
