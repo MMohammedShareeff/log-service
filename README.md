@@ -269,4 +269,5 @@ k6 run -e TARGET_LOGS_PER_SEC=15000 -e DURATION=120s -e BATCH_SIZE=2000 k6/full-
     A deadlock here would currently surface as an error rather than being retried transparently.
 * **No automated regression tests**: The project doesn't currently have a unit or integration test suite. Two real bugs (an ambiguous GROUP BY column reference, and a cursor-decoding edge case) were found via production stack traces rather than caught by tests
   both are fixed, but nothing currently guards against similar regressions being reintroduced later.
+* although spike and breakpoint scenarios are working without bugs.. but they do not accept any record as logs per second equals to zero. and they are marked as **generator limited not service limited**.  
 
